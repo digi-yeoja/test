@@ -1,5 +1,6 @@
 streamlit
 selenium
+selenium-webdriver
 chromedriver-autoinstaller
 PyMuPDF
 python-docx
