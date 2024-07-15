@@ -1,0 +1,6 @@
+streamlit
+selenium
+chromedriver-autoinstaller
+PyMuPDF
+python-docx
+anthropic
