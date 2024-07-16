@@ -1,5 +1,9 @@
 streamlit
-chromedriver-autoinstaller
+requests
+beautifulsoup4
 PyMuPDF
 python-docx
+python-magic
 anthropic
+selenium
+chromedriver-autoinstaller
