@@ -1,35 +1,18 @@
 import streamlit as st
 import os
 from datetime import datetime
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
-import chromedriver_autoinstaller
-import tempfile
 import requests
+from bs4 import BeautifulSoup
+import tempfile
 import fitz
 import docx
 import mimetypes
 import anthropic
 
 # Constants
-last_run_file = 'last_run.txt'
-ANTHROPIC_API_KEY = st.secrets['ANTHROPIC_API_KEY']
+ANTHROPIC_API_KEY = st.secrets["ANTHROPIC_API_KEY"]
 
 # Helper Functions
-def read_last_run_date():
-    if os.path.exists(last_run_file):
-        with open(last_run_file, 'r') as file:
-            last_run_date = file.read().strip()
-            return datetime.strptime(last_run_date, '%Y-%m-%d %H:%M:%S')
-    return None
-
-def save_current_run_date():
-    with open(last_run_file, 'w') as file:
-        file.write(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-
 def extract_file_size(size_info):
     size, unit = size_info.split()
     size = float(size)
@@ -105,12 +88,12 @@ client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 def summarize_text(text):
     try:
         response = client.messages.create(
-            model="claude-3-5-sonnet-20240620",
+            model="claude-3-opus-20240229",
             max_tokens=1000,
             temperature=0.3,
             messages=[
                 {"role": "user", 
-                "content": f"""Summarize the following text as a bullet point list in French. Capture all main ideas and key information, organizing points by themes if possible. Ensure each bullet is concise and informative.
+                "content": f"""Summarize the following text even if it's in arabic as a bullet point list in French. Capture all main ideas and key information, organizing points by themes if possible. 
                             Text to summarize:\n\n{text}\n\nExample summary:
                             Original text: The new iPhone 13 Pro features a redesigned camera system, longer battery life, and a faster A15 Bionic chip. It also includes new software features like Photographic Styles and Cinematic mode.
                             Example summary:
@@ -124,13 +107,10 @@ def summarize_text(text):
 
                             Additional instructions:
                                 - Start each main point with a bullet point symbol (•) and bold
-                                - Use sub-bullets (-) if necessary for details
                                 - Retain important figures and percentages
                                 - Include all key information and ideas
                                 - Do not add external information
-                                - Ensure the summary captures the essence of the entire text, regardless of the length
-                                - Aim for completeness within the token limit, prioritizing the most important information
-                                - don't start with such sentences: Voici un résumé en français sous forme de liste à puces des principaux points du texte 
+                                - Ensure the summary captures the essence of the entire text, regardless of the length, prioritizing the most important information
                                 """}
             ]
         )
@@ -139,90 +119,98 @@ def summarize_text(text):
         print(f"An error occurred while calling the API: {e}")
         return None
 
+def parse_date(date_string):
+    cleaned_date = date_string.strip()
+    return datetime.strptime(cleaned_date, "%d/%m/%Y")
+
+
 # Main Streamlit App
 st.title("HCP Publications Extractor")
 
 if st.button("Extract and Summarize New Publications"):
-    last_run_date = read_last_run_date()
-    st.write("Last run date: ", last_run_date)
+    if 'last_run_date' not in st.session_state:
+        st.session_state['last_run_date'] = None
 
-    chrome_options = webdriver.ChromeOptions()
-    chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--headless')
-    chrome_options.add_argument('--disable-dev-shm-usage')
-    chrome_options.add_argument('--disable-gpu')
-    chrome_options.add_argument('--window-size=1920x1080')
+    last_run_date = st.session_state['last_run_date']
 
-    chromedriver_autoinstaller.install()
+    if last_run_date:
+        st.write("Last run date: ", last_run_date.strftime("%d/%m/%Y"))
+    else:
+        st.write("First run - fetching all available publications")
 
     url = "https://www.hcp.ma/"
-    driver = webdriver.Chrome(options=chrome_options)
+    response = requests.get(url)
+    soup = BeautifulSoup(response.content, 'html.parser')
 
-    try:
-        driver.get(url)
-
-        WebDriverWait(driver, 20).until(
-            EC.element_to_be_clickable((By.LINK_TEXT, "PUBLICATIONS"))
-        ).click()
+    publications_link = soup.find('a', href="https://www.wmaker.net/testhcp/downloads/?tag=Derni%C3%A8res+parutions")
+    if publications_link:
+        publications_url = publications_link['href']
+        publications_response = requests.get(publications_url)
+        publications_soup = BeautifulSoup(publications_response.content, 'html.parser')
 
         data = []
+        publications = publications_soup.find_all(class_="delimiter")
+        processed_titles = {}
 
-        list_of_results = WebDriverWait(driver, 20).until(
-            EC.presence_of_all_elements_located((By.CLASS_NAME, "delimiter"))
-        )
+        for pub in publications:
+            title = pub.find('div', class_= 'titre_fichier').text.strip() if pub.find('div', class_= 'titre_fichier') else ""
+            date_info = pub.find('div', class_='information').text.split('Publié le : ')[1].split('\n')[0].strip() if pub.find('div', class_='information') else ""
+            size_info = pub.find('div', class_='information').text.split('Taille : ')[1].split(' | ')[0] if pub.find('div', class_='information') else ""
+            download_link = pub.find('div', class_='information').find('a')['href'] if pub.find('div', class_='information') else ""
+            download_link = url + download_link
 
-        for result in list_of_results:
-            text = result.text
-            try:
-                img = result.find_element(By.CSS_SELECTOR, "a img")
-                parent = img.find_element(By.XPATH, '..')
-                download_link = parent.get_attribute('href')
-            except NoSuchElementException:
-                download_link = ""
-            
-            if '\n\n' in text:
-                title, tags_info = text.split('\n\n', 1)
-                published_date_info = tags_info.split('Publié le : ')[1].split('\n')[0]
-                size_info = tags_info.split('Taille : ')[1].split(' | ')[0]
-            else:
-                title = text.strip()
-                published_date_info = ""
-                size_info = ""
+            # Vérifier si c'est une version française ou arabe
+            base_title = title.split('(version')[0].strip()
+            is_french = '(version Fr)' in title
+            is_arabic = '(version Ar)' in title
 
-            if last_run_date:
-                pub_date = datetime.strptime(published_date_info, '%d/%m/%Y')
-                if pub_date <= last_run_date:
-                    continue
+            # Traiter la publication si c'est une version française ou si aucune version n'est spécifiée
+            if is_french or (not is_arabic and base_title not in processed_titles):
+                try:
+                    pub_date = parse_date(date_info)
+                    if last_run_date and pub_date <= last_run_date:
+                        continue
+                except ValueError as e:
+                    st.write(f"Erreur lors du traitement de la date '{date_info}': {e}")
+                    continue  # Passer à la publication suivante en cas d'erreur
 
-            size = extract_file_size(size_info)
-            if size is not None and size > 10:  
-                st.write(f"File too large to download: {title} ({size:.2f} MB)")
-            elif download_link:
-                content = download_and_extract_content(download_link)
-                if content:
-                    summary = summarize_text(content)
-                    if summary:
-                        st.markdown(f"#### {title}")
-                        st.markdown(summary, unsafe_allow_html=True)
-                    else:
-                        st.write("Unable to generate a summary for this content.")
+                st.write(f"Processing: {title} ({date_info})")
+                size = extract_file_size(size_info)
+                if size is not None and size > 10:  
+                    st.write(f"File too large to download: {title} ({size:.2f} MB)")
+                    data.append({
+                        "Title": title,
+                        "Date": date_info,
+                        "Download link": download_link,
+                        "Summary": "Fichier trop volumineux pour être traité"
+                    })
+                elif download_link:
+                    content = download_and_extract_content(download_link)
+                    if content:
+                        #summary = summarize_text(content)
+                        summary = True
+                        if summary:
+                            data.append({
+                                "Title": title,
+                                "Date": date_info,
+                                "Download link": download_link,
+                                "Summary": summary
+                            })
+                        else:
+                            st.write("Unable to generate a summary for this content.")
 
-                data.append({
-                    "Title": title,
-                    "Download link": download_link,
-                })
+                processed_titles[base_title] = True
 
-        num_new_publications = len(data)
+        st.write("### Nouvelles publications détectées :")
+        for item in data:
+            st.write(f"**{item['Title']}**")
+            st.write(f"Date de publication : {item['Date']}")
+            st.markdown(item['Summary'], unsafe_allow_html=True)
+            st.write("---")
 
-        save_current_run_date()
+        st.write(f"**Total : {len(data)} nouvelles publications.**")
 
-    except (TimeoutException, NoSuchElementException) as e:
-        st.write(f"An error occurred: {e}")
-        
-    finally:
-        driver.quit()
-
-    if data:
-        st.write(f"**- {num_new_publications}  new publications detected.**")
+        # Mise à jour de la date de dernière exécution
+        st.session_state['last_run_date'] = datetime.now()
     else:
-        st.write("**No new publications found.**")
+        st.write("Unable to find the PUBLICATIONS link on the webpage.")
