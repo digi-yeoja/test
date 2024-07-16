@@ -5,5 +5,5 @@ PyMuPDF
 python-docx
 python-magic
 anthropic
-selenium
+selenium==4.5.0
 chromedriver-autoinstaller
