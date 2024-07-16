@@ -10,7 +10,7 @@ import mimetypes
 import anthropic
 
 # Constants
-ANTHROPIC_API_KEY = st.secrets["ANTHROPIC_API_KEY"]
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
 # Helper Functions
 def extract_file_size(size_info):
