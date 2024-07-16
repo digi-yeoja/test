@@ -1,6 +1,6 @@
 streamlit
 requests
-beautifulsoup==4.12. 3 
+beautifulsoup==4.12.3 
 PyMuPDF
 python-docx
 anthropic
