@@ -212,5 +212,6 @@ if st.button("Extract and Summarize New Publications"):
 
         # Mise à jour de la date de dernière exécution
         st.session_state['last_run_date'] = datetime.now()
+        st.write(last_run_date)
     else:
         st.write("Unable to find the PUBLICATIONS link on the webpage.")
