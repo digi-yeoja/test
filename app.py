@@ -153,9 +153,6 @@ def update_last_run_date(conn, username, date):
         cur.execute("UPDATE users SET last_run_date = %s WHERE username = %s", (date, username))
     conn.commit()
 
-
-
-
 if 'db_conn' not in st.session_state:
     st.session_state.db_conn = init_db()
 
@@ -166,26 +163,21 @@ username = st.text_input("Entrez votre nom d'utilisateur")
 
 if username:
     upsert_user(st.session_state.db_conn, username)
-    st.success(f"Bienvenue, {username}!")
+    st.success(f"Bienvenue {username}!")
 
     last_run_date = get_last_run_date(st.session_state.db_conn, username)
 
     if last_run_date:
-        st.write(f"Dernière exécution : {last_run_date.strftime('%d/%m/%Y %H:%M:%S')}")
+        st.write(f"Dernière exécution :", last_run_date)
     else:
         st.write("Première exécution - toutes les publications disponibles seront extraites.")
-
+#########################
     if st.button("Réinitialiser la date de dernière exécution"):
         update_last_run_date(st.session_state.db_conn, username, None)
         st.success("Date de dernière exécution réinitialisée.")
         st.experimental_rerun()
-
+##########################
     if st.button("Extraire et résumer les nouvelles publications"):
-        if last_run_date:
-            st.write("Last run date: ", last_run_date)
-        else:
-            st.write("First run - fetching all available publications")
-
         url = "https://www.hcp.ma/"
         response = requests.get(url)
         soup = BeautifulSoup(response.content, 'html.parser')
@@ -252,7 +244,6 @@ if username:
 
               # Après le traitement, mettez à jour la date de dernière exécution
             update_last_run_date(st.session_state.db_conn, username, datetime.now())
-            st.write(f"Prochaine exécution commencera à partir de : {datetime.now().strftime('%d/%m/%Y')}")
         else:
             st.warning("Veuillez entrer un nom d'utilisateur pour continuer.")
 
