@@ -189,7 +189,7 @@ if username:
     if st.button("Reset last run date"):
         update_last_run_date(st.session_state.db_conn, username, None) 
         st.success("Last run date reset.")
-        st.experimental_rerun() 
+        st.rerun() 
 #######################################################################
 
     # Button to extract and summarize new publications
