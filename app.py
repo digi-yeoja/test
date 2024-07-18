@@ -21,9 +21,9 @@ def extract_file_size(size_info):
     size, unit = size_info.split()
     size = float(size)
     if unit.lower() == 'ko':
-        return size / 1024  # Convert KB to MB
+        return size / 1024
     elif unit.lower() == 'mo':
-        return size  # File size is already in MB
+        return size 
     else:
         print(f"Unrecognized size unit: {unit}")
         return None
@@ -180,7 +180,7 @@ if username:
     last_run_date = get_last_run_date(st.session_state.db_conn, username)
 
     if last_run_date:
-        st.write(f"Last run date:", last_run_date)  # Display last run date if available
+        st.write(f"Last run date:", last_run_date)  
     else:
         st.write("First run - all publications available will be extracted.")
         
