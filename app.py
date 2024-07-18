@@ -129,7 +129,7 @@ def parse_date(date_string):
 DATABASE_URL = os.environ['DATABASE_URL']
 
 def init_db():
-    conn = psycopg2.connect(os.environ[DATABASE_URL], sslmode='require')
+    conn = psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
     with conn.cursor() as cur:
         cur.execute('''CREATE TABLE IF NOT EXISTS users
                        (username TEXT PRIMARY KEY, last_run_date TIMESTAMP)''')
@@ -138,7 +138,7 @@ def init_db():
 
 # Fonction pour ajouter ou mettre à jour un utilisateur
 def upsert_user(username):
-    conn = psycopg2.connect(os.environ[DATABASE_URL], sslmode='require')
+    conn = psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
     with conn.cursor() as cur:
         cur.execute("INSERT INTO users (username) VALUES (%s) ON CONFLICT (username) DO NOTHING", (username,))
     conn.commit()
@@ -146,7 +146,7 @@ def upsert_user(username):
 
 # Fonction pour obtenir la dernière date d'exécution d'un utilisateur
 def get_last_run_date(username):
-    conn = psycopg2.connect(os.environ[DATABASE_URL], sslmode='require')
+    conn = psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
     with conn.cursor(cursor_factory=DictCursor) as cur:
         cur.execute("SELECT last_run_date FROM users WHERE username = %s", (username,))
         result = cur.fetchone()
@@ -155,7 +155,7 @@ def get_last_run_date(username):
 
 # Fonction pour mettre à jour la dernière date d'exécution d'un utilisateur
 def update_last_run_date(username, date):
-    conn = psycopg2.connect(os.environ[DATABASE_URL], sslmode='require')
+    conn = psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
     with conn.cursor() as cur:
         cur.execute("UPDATE users SET last_run_date = %s WHERE username = %s", (date, username))
     conn.commit()
