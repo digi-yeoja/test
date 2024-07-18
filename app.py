@@ -1,5 +1,7 @@
 import streamlit as st
 import os
+import psycopg2
+from psycopg2.extras import DictCursor
 from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
@@ -8,6 +10,7 @@ import fitz
 import docx
 import mimetypes
 import anthropic
+from threading import Lock
 
 # Constants
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
@@ -36,7 +39,6 @@ def download_and_extract_content(url):
             print(f"File downloaded and saved to {file_path}")
             
             file_type = detect_file_type(file_path)
-            print(f"Detected file type: {file_type}")
             
             return extract_content(file_path, file_type)
         else:
@@ -123,95 +125,139 @@ def parse_date(date_string):
     cleaned_date = date_string.strip()
     return datetime.strptime(cleaned_date, "%d/%m/%Y")
 
+# Configuration de la connexion à la base de données
+DATABASE_URL = os.environ['DATABASE_URL']
 
-# Main Streamlit App
+def init_db():
+    conn = psycopg2.connect(os.environ[DATABASE_URL], sslmode='require')
+    with conn.cursor() as cur:
+        cur.execute('''CREATE TABLE IF NOT EXISTS users
+                       (username TEXT PRIMARY KEY, last_run_date TIMESTAMP)''')
+    conn.commit()
+    conn.close()
+
+# Fonction pour ajouter ou mettre à jour un utilisateur
+def upsert_user(username):
+    conn = psycopg2.connect(os.environ[DATABASE_URL], sslmode='require')
+    with conn.cursor() as cur:
+        cur.execute("INSERT INTO users (username) VALUES (%s) ON CONFLICT (username) DO NOTHING", (username,))
+    conn.commit()
+    conn.close()
+
+# Fonction pour obtenir la dernière date d'exécution d'un utilisateur
+def get_last_run_date(username):
+    conn = psycopg2.connect(os.environ[DATABASE_URL], sslmode='require')
+    with conn.cursor(cursor_factory=DictCursor) as cur:
+        cur.execute("SELECT last_run_date FROM users WHERE username = %s", (username,))
+        result = cur.fetchone()
+    conn.close()
+    return result['last_run_date'] if result else None
+
+# Fonction pour mettre à jour la dernière date d'exécution d'un utilisateur
+def update_last_run_date(username, date):
+    conn = psycopg2.connect(os.environ[DATABASE_URL], sslmode='require')
+    with conn.cursor() as cur:
+        cur.execute("UPDATE users SET last_run_date = %s WHERE username = %s", (date, username))
+    conn.commit()
+    conn.close()
+
+# Initialiser la connexion à la base de données
+if 'db_conn' not in st.session_state:
+    st.session_state.db_conn = init_db()
+
+# Utilisation des fonctions
 st.title("HCP Publications Extractor")
 
-if st.button("Extract and Summarize New Publications"):
-    if 'last_run_date' not in st.session_state:
-        st.session_state['last_run_date'] = None
+username = st.text_input("Entrez votre nom d'utilisateur")
 
-    last_run_date = st.session_state['last_run_date']
+if username:
+    upsert_user(st.session_state.db_conn, username)
+    st.success(f"Bienvenue, {username}!")
+
+    last_run_date = get_last_run_date(st.session_state.db_conn, username)
 
     if last_run_date:
-        st.write("Last run date: ", last_run_date.strftime("%d/%m/%Y"))
+        st.write(f"Dernière exécution : {last_run_date.strftime('%d/%m/%Y %H:%M:%S')}")
     else:
-        st.write("First run - fetching all available publications")
+        st.write("Première exécution - toutes les publications disponibles seront extraites.")
 
-    url = "https://www.hcp.ma/"
-    response = requests.get(url)
-    soup = BeautifulSoup(response.content, 'html.parser')
+    if st.button("Réinitialiser la date de dernière exécution"):
+        update_last_run_date(st.session_state.db_conn, username, None)
+        st.success("Date de dernière exécution réinitialisée.")
+        st.experimental_rerun()
 
-    publications_link = soup.find('a', href="https://www.wmaker.net/testhcp/downloads/?tag=Derni%C3%A8res+parutions")
-    if publications_link:
-        publications_url = publications_link['href']
-        publications_response = requests.get(publications_url)
-        publications_soup = BeautifulSoup(publications_response.content, 'html.parser')
+    if st.button("Extraire et résumer les nouvelles publications"):
+        if last_run_date:
+            st.write("Last run date: ", last_run_date)
+        else:
+            st.write("First run - fetching all available publications")
 
-        data = []
-        publications = publications_soup.find_all(class_="delimiter")
-        processed_titles = {}
+        url = "https://www.hcp.ma/"
+        response = requests.get(url)
+        soup = BeautifulSoup(response.content, 'html.parser')
 
-        for pub in publications:
-            title = pub.find('div', class_= 'titre_fichier').text.strip() if pub.find('div', class_= 'titre_fichier') else ""
-            date_info = pub.find('div', class_='information').text.split('Publié le : ')[1].split('\n')[0].strip() if pub.find('div', class_='information') else ""
-            size_info = pub.find('div', class_='information').text.split('Taille : ')[1].split(' | ')[0] if pub.find('div', class_='information') else ""
-            download_link = pub.find('div', class_='information').find('a')['href'] if pub.find('div', class_='information') else ""
-            download_link = url + download_link
+        publications_link = soup.find('a', href="https://www.wmaker.net/testhcp/downloads/?tag=Derni%C3%A8res+parutions")
+        if publications_link:
+            publications_url = publications_link['href']
+            publications_response = requests.get(publications_url)
+            publications_soup = BeautifulSoup(publications_response.content, 'html.parser')
 
-            # Vérifier si c'est une version française ou arabe
-            base_title = title.split('(version')[0].strip()
-            is_french = '(version Fr)' in title
-            is_arabic = '(version Ar)' in title
+            data = []
+            publications = publications_soup.find_all(class_="delimiter")
+            processed_titles = set()
 
-            # Traiter la publication si c'est une version française ou si aucune version n'est spécifiée
-            if is_french or (not is_arabic and base_title not in processed_titles):
-                try:
-                    pub_date = parse_date(date_info)
-                    if last_run_date and pub_date <= last_run_date:
-                        continue
-                except ValueError as e:
-                    st.write(f"Erreur lors du traitement de la date '{date_info}': {e}")
-                    continue  # Passer à la publication suivante en cas d'erreur
+            for pub in publications:
+                title = pub.find('div', class_= 'titre_fichier').text.strip() if pub.find('div', class_= 'titre_fichier') else ""
+                date_info = pub.find('div', class_='information').text.split('Publié le : ')[1].split('\n')[0].strip() if pub.find('div', class_='information') else ""
+                size_info = pub.find('div', class_='information').text.split('Taille : ')[1].split(' | ')[0] if pub.find('div', class_='information') else ""
+                download_link = pub.find('div', class_='information').find('a')['href'] if pub.find('div', class_='information') else ""
+                download_link = url + download_link
 
-                st.write(f"Processing: {title} ({date_info})")
-                size = extract_file_size(size_info)
-                if size is not None and size > 10:  
-                    st.write(f"File too large to download: {title} ({size:.2f} MB)")
-                    data.append({
-                        "Title": title,
-                        "Date": date_info,
-                        "Download link": download_link,
-                        "Summary": "Fichier trop volumineux pour être traité"
-                    })
-                elif download_link:
-                    content = download_and_extract_content(download_link)
-                    if content:
-                        #summary = summarize_text(content)
-                        summary = True
-                        if summary:
-                            data.append({
-                                "Title": title,
-                                "Date": date_info,
-                                "Download link": download_link,
-                                "Summary": summary
-                            })
-                        else:
-                            st.write("Unable to generate a summary for this content.")
+                # Vérifier si c'est une version arabe d'un titre déjà traité
+                base_title = title.split('(version')[0].strip()
+                if base_title in processed_titles:
+                    continue
 
-                processed_titles[base_title] = True
+                if '(version Fr)' in title or '(version Ar)' not in title:
+                    try:
+                        pub_date = parse_date(date_info)
+                        if last_run_date and pub_date <= last_run_date:
+                            continue
+                    except ValueError as e:
+                        st.write(f"Erreur lors du traitement de la date '{date_info}': {e}")
+                        continue  # Passer à la publication suivante en cas d'erreur
 
-        st.write("### Nouvelles publications détectées :")
-        for item in data:
-            st.write(f"**{item['Title']}**")
-            st.write(f"Date de publication : {item['Date']}")
-            st.markdown(item['Summary'], unsafe_allow_html=True)
-            st.write("---")
+                    size = extract_file_size(size_info)
+                    if size is not None and size > 10:  
+                        st.write(f"File too large to download: {title} ({size:.2f} MB)")
+                    elif download_link:
+                        content = download_and_extract_content(download_link)
+                        if content:
+                            #summary = summarize_text(content)
+                            summary = True
+                            if summary:
+                                data.append({
+                                    "Title": title,
+                                    "Date": date_info,
+                                    "Download link": download_link,
+                                    "Summary": summary
+                                })
+                            else:
+                                st.write("Unable to generate a summary for this content.")
 
-        st.write(f"**Total : {len(data)} nouvelles publications.**")
+                    processed_titles.add(base_title)
 
-        # Mise à jour de la date de dernière exécution
-        st.session_state['last_run_date'] = datetime.now()
-        st.write(last_run_date)
-    else:
-        st.write("Unable to find the PUBLICATIONS link on the webpage.")
+            st.write("### Nouvelles publications détectées :")
+            for item in data:
+                st.write(f"**{item['Title']}**")
+                st.write(f"Date de publication : {item['Date']}")
+                st.markdown(item['Summary'], unsafe_allow_html=True)
+                st.write("---")
+
+            st.write(f"**Total : {len(data)} nouvelles publications.**")
+
+              # Après le traitement, mettez à jour la date de dernière exécution
+            update_last_run_date(st.session_state.db_conn, username, datetime.now())
+            st.write(f"Prochaine exécution commencera à partir de : {datetime.now().strftime('%d/%m/%Y')}")
+        else:
+            st.warning("Veuillez entrer un nom d'utilisateur pour continuer.")
