@@ -10,7 +10,7 @@ import fitz
 import docx
 import mimetypes
 import anthropic
-from threading import Lock
+
 
 # Constants
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
@@ -129,39 +129,40 @@ def parse_date(date_string):
 DATABASE_URL = os.environ['DATABASE_URL']
 
 def init_db():
-    conn = psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
+    conn = psycopg2.connect(DATABASE_URL, sslmode='require')
     with conn.cursor() as cur:
         cur.execute('''CREATE TABLE IF NOT EXISTS users
                        (username TEXT PRIMARY KEY, last_run_date TIMESTAMP)''')
     conn.commit()
-    conn.close()
+    return conn
 
-# Fonction pour ajouter ou mettre à jour un utilisateur
-def upsert_user(username):
-    conn = psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
+
+def upsert_user(conn, username):
     with conn.cursor() as cur:
         cur.execute("INSERT INTO users (username) VALUES (%s) ON CONFLICT (username) DO NOTHING", (username,))
     conn.commit()
-    conn.close()
 
-# Fonction pour obtenir la dernière date d'exécution d'un utilisateur
-def get_last_run_date(username):
-    conn = psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
+def get_last_run_date(conn, username):
     with conn.cursor(cursor_factory=DictCursor) as cur:
         cur.execute("SELECT last_run_date FROM users WHERE username = %s", (username,))
         result = cur.fetchone()
-    conn.close()
     return result['last_run_date'] if result else None
 
-# Fonction pour mettre à jour la dernière date d'exécution d'un utilisateur
-def update_last_run_date(username, date):
-    conn = psycopg2.connect(os.environ['DATABASE_URL'], sslmode='require')
+def update_last_run_date(conn, username, date):
     with conn.cursor() as cur:
         cur.execute("UPDATE users SET last_run_date = %s WHERE username = %s", (date, username))
     conn.commit()
-    conn.close()
+
 
 # Initialiser la connexion à la base de données
+if 'db_conn' not in st.session_state:
+    st.session_state.db_conn = init_db()
+
+# Utilisation des fonctions
+st.title("HCP Publications Extractor")
+
+username = st.text_input("Entrez votre nom d'utilisateur")
+
 if 'db_conn' not in st.session_state:
     st.session_state.db_conn = init_db()
 
@@ -261,3 +262,4 @@ if username:
             st.write(f"Prochaine exécution commencera à partir de : {datetime.now().strftime('%d/%m/%Y')}")
         else:
             st.warning("Veuillez entrer un nom d'utilisateur pour continuer.")
+
