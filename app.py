@@ -6,7 +6,7 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 import tempfile
-import fitz  # PyMuPDF
+import fitz 
 import docx
 import mimetypes
 import anthropic
