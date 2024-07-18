@@ -154,14 +154,7 @@ def update_last_run_date(conn, username, date):
     conn.commit()
 
 
-# Initialiser la connexion à la base de données
-if 'db_conn' not in st.session_state:
-    st.session_state.db_conn = init_db()
 
-# Utilisation des fonctions
-st.title("HCP Publications Extractor")
-
-username = st.text_input("Entrez votre nom d'utilisateur")
 
 if 'db_conn' not in st.session_state:
     st.session_state.db_conn = init_db()
